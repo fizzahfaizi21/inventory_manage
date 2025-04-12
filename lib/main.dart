@@ -47,6 +47,39 @@ class InventoryItem {
   }
 }
 
+// Firestore Service
+class FirestoreService {
+  final CollectionReference _itemsCollection = FirebaseFirestore.instance
+      .collection('items');
+
+  // Create: Add a new item to Firestore
+  Future<void> addItem(InventoryItem item) {
+    return _itemsCollection.add(item.toMap());
+  }
+
+  // Read: Get a stream of all items
+  Stream<List<InventoryItem>> getItems() {
+    return _itemsCollection.snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) {
+        return InventoryItem.fromMap(
+          doc.data() as Map<String, dynamic>,
+          doc.id,
+        );
+      }).toList();
+    });
+  }
+
+  // Update: Update an existing item
+  Future<void> updateItem(InventoryItem item) {
+    return _itemsCollection.doc(item.id).update(item.toMap());
+  }
+
+  // Delete: Remove an item
+  Future<void> deleteItem(String itemId) {
+    return _itemsCollection.doc(itemId).delete();
+  }
+}
+
 class InventoryApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -70,6 +103,8 @@ class InventoryHomePage extends StatefulWidget {
 }
 
 class _InventoryHomePageState extends State<InventoryHomePage> {
+  final FirestoreService _firestoreService = FirestoreService();
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -144,8 +179,20 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
             ),
             TextButton(
               onPressed: () {
-                // TODO: Save item to Firestore
-                Navigator.of(context).pop();
+                // Create a new item and save it to Firestore
+                if (nameController.text.isNotEmpty &&
+                    quantityController.text.isNotEmpty &&
+                    priceController.text.isNotEmpty) {
+                  final newItem = InventoryItem(
+                    name: nameController.text,
+                    quantity: int.tryParse(quantityController.text) ?? 0,
+                    price: double.tryParse(priceController.text) ?? 0.0,
+                    category: categoryController.text,
+                  );
+
+                  _firestoreService.addItem(newItem);
+                  Navigator.of(context).pop();
+                }
               },
               child: Text('Save'),
             ),
