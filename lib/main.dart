@@ -2,9 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Add these Firebase options for manual configuration
+const firebaseOptions = FirebaseOptions(
+  apiKey: "YOUR_API_KEY", // Replace with your actual Firebase project values
+  appId: "YOUR_APP_ID",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  projectId: "YOUR_PROJECT_ID",
+);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: firebaseOptions,
+  ); // Use the manual options
   runApp(InventoryApp());
 }
 
@@ -53,7 +63,7 @@ class FirestoreService {
       .collection('items');
 
   // Create: Add a new item to Firestore
-  Future<void> addItem(InventoryItem item) {
+  Future<DocumentReference> addItem(InventoryItem item) {
     return _itemsCollection.add(item.toMap());
   }
 
@@ -104,67 +114,102 @@ class InventoryHomePage extends StatefulWidget {
 
 class _InventoryHomePageState extends State<InventoryHomePage> {
   final FirestoreService _firestoreService = FirestoreService();
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
+  bool _isLoading = false;
+
+  void _showSnackBar(String message) {
+    _scaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              'Inventory Items',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+    return ScaffoldMessenger(
+      key: _scaffoldMessengerKey,
+      child: Scaffold(
+        appBar: AppBar(title: Text(widget.title)),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                'Inventory Items',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
             ),
-          ),
-          Expanded(
-            child: StreamBuilder<List<InventoryItem>>(
-              stream: _firestoreService.getItems(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
+            Expanded(
+              child: StreamBuilder<List<InventoryItem>>(
+                stream: _firestoreService.getItems(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(child: Text('Error: ${snapshot.error}'));
+                  }
 
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Center(child: CircularProgressIndicator());
-                }
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Center(child: CircularProgressIndicator());
+                  }
 
-                if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return Center(child: Text('No items in inventory'));
-                }
+                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                    return Center(child: Text('No items in inventory'));
+                  }
 
-                return ListView.builder(
-                  itemCount: snapshot.data!.length,
-                  itemBuilder: (context, index) {
-                    final item = snapshot.data![index];
-                    return Card(
-                      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: ListTile(
-                        title: Text(item.name),
-                        subtitle: Text(
-                          'Quantity: ${item.quantity} | Price: \$${item.price.toStringAsFixed(2)}',
+                  return ListView.builder(
+                    itemCount: snapshot.data!.length,
+                    itemBuilder: (context, index) {
+                      final item = snapshot.data![index];
+                      return Card(
+                        margin: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
                         ),
-                        trailing: Text('Category: ${item.category}'),
-                        onTap: () {
-                          // Will implement editing functionality in next step
-                        },
-                      ),
-                    );
-                  },
-                );
-              },
+                        child: ListTile(
+                          title: Text(item.name),
+                          subtitle: Text(
+                            'Quantity: ${item.quantity} | Price: \$${item.price.toStringAsFixed(2)}',
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('Category: ${item.category}'),
+                              IconButton(
+                                icon: Icon(Icons.delete),
+                                onPressed: () async {
+                                  try {
+                                    await _firestoreService.deleteItem(
+                                      item.id!,
+                                    );
+                                    _showSnackBar('Item deleted successfully');
+                                  } catch (e) {
+                                    _showSnackBar('Error deleting item: $e');
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          onTap: () {
+                            // Will implement editing in next step
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // Show form to add new item
-          _showAddItemDialog(context);
-        },
-        tooltip: 'Add Item',
-        child: Icon(Icons.add),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: () {
+            _showAddItemDialog(context);
+          },
+          tooltip: 'Add Item',
+          child:
+              _isLoading
+                  ? CircularProgressIndicator(color: Colors.white)
+                  : Icon(Icons.add),
+        ),
       ),
     );
   }
@@ -174,6 +219,7 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
     final quantityController = TextEditingController();
     final priceController = TextEditingController();
     final categoryController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
 
     showDialog(
       context: context,
@@ -181,28 +227,63 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
         return AlertDialog(
           title: Text('Add New Item'),
           content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: InputDecoration(labelText: 'Item Name'),
-                ),
-                TextField(
-                  controller: quantityController,
-                  decoration: InputDecoration(labelText: 'Quantity'),
-                  keyboardType: TextInputType.number,
-                ),
-                TextField(
-                  controller: priceController,
-                  decoration: InputDecoration(labelText: 'Price'),
-                  keyboardType: TextInputType.numberWithOptions(decimal: true),
-                ),
-                TextField(
-                  controller: categoryController,
-                  decoration: InputDecoration(labelText: 'Category'),
-                ),
-              ],
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameController,
+                    decoration: InputDecoration(labelText: 'Item Name'),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter item name';
+                      }
+                      return null;
+                    },
+                  ),
+                  TextFormField(
+                    controller: quantityController,
+                    decoration: InputDecoration(labelText: 'Quantity'),
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter quantity';
+                      }
+                      if (int.tryParse(value) == null) {
+                        return 'Please enter a valid number';
+                      }
+                      return null;
+                    },
+                  ),
+                  TextFormField(
+                    controller: priceController,
+                    decoration: InputDecoration(labelText: 'Price'),
+                    keyboardType: TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter price';
+                      }
+                      if (double.tryParse(value) == null) {
+                        return 'Please enter a valid price';
+                      }
+                      return null;
+                    },
+                  ),
+                  TextFormField(
+                    controller: categoryController,
+                    decoration: InputDecoration(labelText: 'Category'),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter category';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -213,20 +294,36 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
               child: Text('Cancel'),
             ),
             TextButton(
-              onPressed: () {
-                // Create a new item and save it to Firestore
-                if (nameController.text.isNotEmpty &&
-                    quantityController.text.isNotEmpty &&
-                    priceController.text.isNotEmpty) {
+              onPressed: () async {
+                // Validate form
+                if (formKey.currentState!.validate()) {
+                  // Create a new item object
                   final newItem = InventoryItem(
                     name: nameController.text,
-                    quantity: int.tryParse(quantityController.text) ?? 0,
-                    price: double.tryParse(priceController.text) ?? 0.0,
+                    quantity: int.parse(quantityController.text),
+                    price: double.parse(priceController.text),
                     category: categoryController.text,
                   );
 
-                  _firestoreService.addItem(newItem);
                   Navigator.of(context).pop();
+
+                  // Show loading indicator
+                  setState(() {
+                    _isLoading = true;
+                  });
+
+                  try {
+                    // Add item to Firestore
+                    await _firestoreService.addItem(newItem);
+                    _showSnackBar('Item added successfully');
+                  } catch (e) {
+                    _showSnackBar('Error adding item: $e');
+                  } finally {
+                    // Hide loading indicator
+                    setState(() {
+                      _isLoading = false;
+                    });
+                  }
                 }
               },
               child: Text('Save'),
