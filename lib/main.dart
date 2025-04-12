@@ -189,7 +189,8 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
                             ],
                           ),
                           onTap: () {
-                            // Will implement editing in next step
+                            // Open edit dialog
+                            _showEditItemDialog(context, item);
                           },
                         ),
                       );
@@ -329,6 +330,141 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
               child: Text('Save'),
             ),
           ],
+        );
+      },
+    );
+  }
+
+  void _showEditItemDialog(BuildContext context, InventoryItem item) {
+    final nameController = TextEditingController(text: item.name);
+    final quantityController = TextEditingController(
+      text: item.quantity.toString(),
+    );
+    final priceController = TextEditingController(text: item.price.toString());
+    final categoryController = TextEditingController(text: item.category);
+    final formKey = GlobalKey<FormState>();
+    bool isProcessing = false;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text('Edit Item'),
+              content: SingleChildScrollView(
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: nameController,
+                        decoration: InputDecoration(labelText: 'Item Name'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter item name';
+                          }
+                          return null;
+                        },
+                      ),
+                      TextFormField(
+                        controller: quantityController,
+                        decoration: InputDecoration(labelText: 'Quantity'),
+                        keyboardType: TextInputType.number,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter quantity';
+                          }
+                          if (int.tryParse(value) == null) {
+                            return 'Please enter a valid number';
+                          }
+                          return null;
+                        },
+                      ),
+                      TextFormField(
+                        controller: priceController,
+                        decoration: InputDecoration(labelText: 'Price'),
+                        keyboardType: TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter price';
+                          }
+                          if (double.tryParse(value) == null) {
+                            return 'Please enter a valid price';
+                          }
+                          return null;
+                        },
+                      ),
+                      TextFormField(
+                        controller: categoryController,
+                        decoration: InputDecoration(labelText: 'Category'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter category';
+                          }
+                          return null;
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed:
+                      isProcessing
+                          ? null
+                          : () async {
+                            // Validate form
+                            if (formKey.currentState!.validate()) {
+                              // Update dialog state to show loading
+                              setDialogState(() {
+                                isProcessing = true;
+                              });
+
+                              // Create updated item object
+                              final updatedItem = InventoryItem(
+                                id: item.id,
+                                name: nameController.text,
+                                quantity: int.parse(quantityController.text),
+                                price: double.parse(priceController.text),
+                                category: categoryController.text,
+                              );
+
+                              try {
+                                // Update item in Firestore
+                                await _firestoreService.updateItem(updatedItem);
+                                Navigator.of(context).pop();
+                                _showSnackBar('Item updated successfully');
+                              } catch (e) {
+                                setDialogState(() {
+                                  isProcessing = false;
+                                });
+                                _showSnackBar('Error updating item: $e');
+                              }
+                            }
+                          },
+                  child:
+                      isProcessing
+                          ? SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                          : Text('Update'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
